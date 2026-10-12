@@ -1,0 +1,14 @@
+{
+  "name": "fallback404",
+  "description": "On-brand 404, loading and error pages for Next.js App Router apps, designed with you in Claude Code.",
+  "owner": {
+    "name": "Fallback404"
+  },
+  "plugins": [
+    {
+      "name": "fallback404",
+      "source": "./",
+      "description": "Finds missing 404, loading and error states in a Next.js App Router app and designs on-brand replacements with you."
+    }
+  ]
+}
