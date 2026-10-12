@@ -1,0 +1,22 @@
+/* Bounce: the body hops in place. */
+.f404-anim-bounce [data-part="body"] {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: f404-bounce 1.4s ease-in-out infinite;
+}
+
+@keyframes f404-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .f404-anim-bounce [data-part="body"] {
+    animation: none;
+  }
+}

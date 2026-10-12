@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <ellipse data-part="shadow" cx="120" cy="212" rx="64" ry="10" fill="var(--f404-line)"/>
+  <g data-part="body">
+    <path d="M60 150c0-44 27-86 60-86s60 42 60 86-27 56-60 56-60-12-60-56z" fill="var(--f404-accent)" stroke="var(--f404-ink)" stroke-width="4" stroke-linejoin="round" pathLength="1"/>
+    <g data-part="face">
+      <circle data-part="eyes" cx="102" cy="132" r="7" fill="var(--f404-ink)"/>
+      <circle data-part="eyes" cx="138" cy="132" r="7" fill="var(--f404-ink)"/>
+      <path data-part="mouth" d="M106 160q14 10 28 0" fill="none" stroke="var(--f404-ink)" stroke-width="4" stroke-linecap="round" pathLength="1"/>
+    </g>
+  </g>
+</svg>

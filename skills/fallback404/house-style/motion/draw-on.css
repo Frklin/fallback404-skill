@@ -1,0 +1,19 @@
+/* Draw-on: stroked paths with pathLength="1" draw themselves once. */
+.f404-anim-draw-on [pathLength] {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: f404-draw-on 1.6s ease-out forwards;
+}
+
+@keyframes f404-draw-on {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .f404-anim-draw-on [pathLength] {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}

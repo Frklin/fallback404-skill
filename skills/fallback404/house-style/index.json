@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "characters": [
+    { "id": "blob", "file": "characters/blob.svg", "kind": "character", "parts": ["body", "face", "eyes", "mouth", "shadow"] },
+    { "id": "orbit", "file": "characters/orbit.svg", "kind": "motif", "parts": ["body", "prop", "shadow"] }
+  ],
+  "motion": [
+    { "id": "draw-on", "file": "motion/draw-on.css", "label": "Draw-on" },
+    { "id": "bounce", "file": "motion/bounce.css", "label": "Bounce" },
+    { "id": "pulse", "file": "motion/pulse.css", "label": "Pulse" }
+  ],
+  "layouts": [
+    { "state": "not-found", "file": "layouts/not-found.md" },
+    { "state": "error", "file": "layouts/error.md" },
+    { "state": "global-error", "file": "layouts/global-error.md" },
+    { "state": "loading", "file": "layouts/loading.md" }
+  ]
+}

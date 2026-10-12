@@ -1,0 +1,24 @@
+/* Pulse: the body breathes, for loaders. */
+.f404-anim-pulse [data-part="body"] {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: f404-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes f404-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.94);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .f404-anim-pulse [data-part="body"] {
+    animation: none;
+  }
+}
