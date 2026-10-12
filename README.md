@@ -32,6 +32,35 @@ rsync -a --exclude '.DS_Store' fallback404-skill/skills/fallback404/ ~/.claude/s
 Restart Claude Code after copying.
 </details>
 
+<details>
+<summary>Update or remove it.</summary>
+
+```bash
+/plugin marketplace update fallback404
+/plugin uninstall fallback404@fallback404
+```
+
+A copy in `~/.claude/skills/fallback404/` is removed by deleting that folder.
+</details>
+
+### Other agents
+
+Any agent that reads [Agent Skills](https://agentskills.io) (a `SKILL.md` in a skills folder) and runs shell commands can use it. Install it with the [`skills` CLI](https://github.com/vercel-labs/skills), from your Next.js app's folder:
+
+```bash
+npx skills add https://github.com/Frklin/fallback404-skill --skill fallback404
+```
+
+It copies the skill to `.agents/skills/fallback404` in the project, which Codex, opencode and Gemini CLI read, and links it into `.claude/skills/` for Claude Code. Add `-g` to install it for your user instead of one project, `-a codex` to pick an agent.
+
+| Agent | Where it looks | Tested |
+| --- | --- | --- |
+| Claude Code | the plugin above, or `.claude/skills/` | whole run, picker included |
+| Codex CLI | `.agents/skills/fallback404` | install, preflight and scan; not the picker or the write phases |
+| opencode, Gemini CLI | `.agents/skills/fallback404` | installs; not run |
+
+`SKILL.md` names its folder `${CLAUDE_SKILL_DIR}`. Claude Code fills that in; other agents are told to use the folder's absolute path.
+
 ## Use it
 
 From your Next.js app's folder, ask Claude:
@@ -49,6 +78,44 @@ What happens:
 3. **Design.** For what you chose, a few options per step in your colors and fonts: a logo if you have none, a mascot or a motif built from your own components, the loader motion, the 404 page. You pick, or reject with a note and get a new round.
 4. **Write.** Files go on a new branch, `fallback404/<date>`, in one components folder plus thin route files. A change to a file you wrote is shown as a diff first and needs your yes.
 5. **Check.** It checks the output rules below, type-checks, screenshots every state in light and dark mode and, if you agree, runs a production build to confirm each 404 answers HTTP 404. Nothing is committed: review with `git diff` and commit when you're happy.
+
+## What it makes
+
+Real sites whose 404 page belongs to them: the site's own colors, fonts and components, and one idea from what the site does. This is the bar the skill designs toward on yours.
+
+| [Strike & Ball](https://www.strikeandball.com/) | [Find a Day](https://www.findaday.app/) | [Step by Step](https://step-by-step-kappa.vercel.app/) |
+| --- | --- | --- |
+| ![Strike & Ball 404: a round with no strikes and no balls](assets/strikeandball-404.png) | ![Find a Day 404: a calendar with one empty slot](assets/findaday-404.png) | ![Step by Step 404: a step that is not there](assets/stepbystep-404.png) |
+| A daily number-guessing game. Its 404 is a round with no strikes and no balls. | Pick the day that works for everyone. Its 404 is a calendar with one empty slot. | Instructions drawn as a flow of steps. Its 404 is a step that is not there. |
+
+## What lands on the branch
+
+```text
+app/
+  global-error.tsx                ← required here; renders its own <html> and <body>
+  not-found.tsx                   ← wrapper, imports from the folder
+  error.tsx                       ← wrapper
+  loading.tsx                     ← wrapper
+  products/[id]/not-found.tsx     ← wrapper, only where a section needs its own
+  fallback404-preview/page.tsx    ← every state on one page, dev only
+
+components/fallback404/
+  illustrations/                  ← MissingStep, BrokenStep…
+  states/                         ← the full 404, error and loading screens
+  copy.ts                         ← all texts in one file
+  fallback404.css                 ← motion classes, instead of editing globals.css
+  manifest.json                   ← which route uses which state
+```
+
+Only the files you picked are written. Your own `globals.css` and `.gitignore` are never edited.
+
+## How it works
+
+- The skill is a `SKILL.md` playbook plus zero-dependency Node scripts (`scan`, `coverage`, `picker`, `branch`, `write`, `check`, `shoot`…) that run inside your project.
+- `scan` parses your routes, `proxy.ts` or `middleware.ts` and data helpers with a vendored `@babel/parser` to find missing states and soft 404s.
+- Each script prints one JSON line, so a run can be resumed: progress lives in `.fallback404/`, which is kept out of git through `.git/info/exclude`.
+- The picker page is a small hosted service the skill talks to: it receives previews and sends back your choice. The files themselves are written locally.
+- `check` enforces the output rules before you see the result.
 
 ## What leaves your machine
 
@@ -68,20 +135,32 @@ Details: [`skills/fallback404/reference/output-rules.md`](skills/fallback404/ref
 
 ## Requirements
 
-- [Claude Code](https://claude.com/claude-code)
+- [Claude Code](https://claude.com/claude-code), or another agent that reads Agent Skills (see [Other agents](#other-agents))
 - Node.js 20+
 - A Next.js App Router app in a git repo (measured on Next.js 16.3 and 16.4)
 - Optional: a one-time headless Chromium download (about 105 MB) for screenshots. The skill asks before downloading; without it, everything still runs except the screenshots and the visual check.
 
 ## What's in this repo
 
-- `skills/fallback404/`: the skill (`SKILL.md`), its reference notes, the house style and the zero-dependency Node scripts it runs
+- `skills/fallback404/`: the skill (`SKILL.md`), its reference notes, the house style (characters, layouts, motion) and the Node scripts it runs
 - `.claude-plugin/`: plugin manifest and marketplace catalog
 - `assets/`: images for this README
+- `.github/`: issue templates
+- `LICENSE`: MIT
+
+## Credits
+
+- [`@babel/parser`](https://github.com/babel/babel/tree/main/packages/babel-parser) 7.29.9, vendored unmodified under its own MIT license (`skills/fallback404/scripts/vendor/`), reads TypeScript and JSX in projects that don't have it installed.
+- [Playwright](https://playwright.dev) takes the screenshots and runs the visual check.
+- Repo layout and README shape follow [latent-spaces/brag](https://github.com/latent-spaces/brag).
 
 ## Contributing
 
-Issues and ideas are welcome: [open an issue](https://github.com/Frklin/fallback404-skill/issues). The code is mirrored from a private repo where its tests live, so pull requests are ported over by hand, with credit.
+Issues and ideas are welcome: [open an issue](https://github.com/Frklin/fallback404-skill/issues/new/choose). The code is mirrored from a private repo where its tests live, so pull requests are ported over by hand, with credit.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Frklin/fallback404-skill&type=Date)](https://star-history.com/#Frklin/fallback404-skill&Date)
 
 ## License
 

@@ -10,7 +10,7 @@ allowed-tools:
 
 Find the 404, loading and error states of this Next.js App Router app, let the user choose on the picker page what to create and what to keep, design the new ones with them, and write them on a new branch. You propose, the user decides: nothing is written without their choice, and nothing is ever committed.
 
-Run every script from the project root as `node ${CLAUDE_SKILL_DIR}/scripts/<name>.mjs …`. Each prints one JSON line (`scan.mjs --report` prints Markdown). On failure it prints `{"error":{"code","message"}}` and exits 1: the message says what to do. Your workspace is `.fallback404/`, kept out of git through `.git/info/exclude`.
+Run every script from the project root as `node ${CLAUDE_SKILL_DIR}/scripts/<name>.mjs …`. `${CLAUDE_SKILL_DIR}` is this skill's folder, the one holding this SKILL.md and `scripts/`: Claude Code fills it in, any other agent replaces it with that folder's absolute path in every command here and in `reference/`. Each prints one JSON line (`scan.mjs --report` prints Markdown). On failure it prints `{"error":{"code","message"}}` and exits 1: the message says what to do. Your workspace is `.fallback404/`, kept out of git through `.git/info/exclude`.
 
 ## Hard rules
 

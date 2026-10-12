@@ -1,0 +1,12 @@
+# Keep the vendored parser out of GitHub's language bar and diffs.
+skills/fallback404/scripts/vendor/** linguist-vendored
+skills/fallback404/scripts/vendor/babel-parser.cjs -diff
+
+# The scripts run on macOS, Linux and Windows: no CRLF in a shebang or a generated file.
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.svg text eol=lf
+*.css text eol=lf
+*.png binary

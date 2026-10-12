@@ -1,0 +1,47 @@
+name: Bug report
+description: The skill failed, wrote something wrong, or missed a page it should have found.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you asked for, what the skill did, and what you expected. Paste the `{"error":{...}}` line if a script printed one.
+    validations:
+      required: true
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Where it went wrong
+      options:
+        - Scan (missed or wrongly reported a page)
+        - Picker page
+        - Writing files / branch
+        - Check (output rules, type-check, screenshots)
+        - Install
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: next
+    attributes:
+      label: Next.js version
+      placeholder: "16.4.0"
+    validations:
+      required: true
+  - type: input
+    id: skill
+    attributes:
+      label: Skill version
+      description: "`version` in `.claude-plugin/plugin.json`, or the `/plugin` list."
+      placeholder: "0.1.0"
+  - type: input
+    id: claude
+    attributes:
+      label: Claude Code and Node versions
+      placeholder: "Claude Code 2.1.275, Node 22.15"
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: "Router layout (`app/`, `src/app/`), `basePath`, `proxy.ts` or `middleware.ts`, Cache Components on or off. Do not paste secrets or private source."

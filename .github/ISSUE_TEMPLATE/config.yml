@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Fallback404 site
+    url: https://fallback404-beta.vercel.app
+    about: What the skill does, with examples.
