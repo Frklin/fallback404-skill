@@ -19,7 +19,7 @@ On Claude Code 2.1.275 or later, one line does both:
 /plugin install fallback404 --marketplace Frklin/fallback404-skill
 ```
 
-Then, inside your Next.js app, ask Claude: *add my missing 404 pages*.
+Then, inside your Next.js app, type `/404s`, or ask Claude: *add my missing 404 pages*.
 
 <details>
 <summary>No plugins? Copy the skill directly.</summary>
@@ -72,13 +72,13 @@ Opening this repo in an agent also works: `.agents/skills/`, `.claude/skills/` a
 
 ## Use it
 
-From your Next.js app's folder, ask Claude:
+From your Next.js app's folder, in Claude Code:
 
 ```text
-add my missing 404 pages
+/404s
 ```
 
-Or be specific: *fix the soft 404s*, *give /dashboard a loading state*, *redesign my 404 page*.
+Or ask Claude in your own words: *add my missing 404 pages*, *fix the soft 404s*, *give /dashboard a loading state*, *redesign my 404 page*. Text after the command goes along too: `/404s fix the soft 404s`.
 
 What happens:
 
@@ -152,6 +152,7 @@ Details: [`skills/fallback404/reference/output-rules.md`](skills/fallback404/ref
 ## What's in this repo
 
 - `skills/fallback404/`: the skill (`SKILL.md`), its reference notes, the house style (characters, layouts, motion) and the Node scripts it runs
+- `skills/404s/`: the `/404s` shortcut, which runs `fallback404` with whatever you type after it
 - `.claude-plugin/`: Claude Code plugin manifest and marketplace catalog (Codex reads the same catalog)
 - `.codex-plugin/`: Codex plugin manifest
 - `plugin.json`: the same manifest in the [Agent Plugins](https://agent-plugins.org) format
