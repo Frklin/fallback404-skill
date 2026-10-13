@@ -53,13 +53,22 @@ npx skills add https://github.com/Frklin/fallback404-skill --skill fallback404
 
 It copies the skill to `.agents/skills/fallback404` in the project, which Codex, opencode and Gemini CLI read, and links it into `.claude/skills/` for Claude Code. Add `-g` to install it for your user instead of one project, `-a codex` to pick an agent.
 
-| Agent | Where it looks | Tested |
+Codex also installs it as a plugin, from the same marketplace:
+
+```bash
+codex plugin marketplace add Frklin/fallback404-skill
+codex plugin add fallback404@fallback404
+```
+
+| Agent | Install | Tested |
 | --- | --- | --- |
-| Claude Code | the plugin above, or `.claude/skills/` | whole run, picker included |
-| Codex CLI | `.agents/skills/fallback404` | install, preflight and scan; not the picker or the write phases |
-| opencode, Gemini CLI | `.agents/skills/fallback404` | installs; not run |
+| Claude Code | the plugin above, or `skills` CLI | whole run, picker included |
+| Codex CLI | the plugin above, or `skills` CLI | plugin install, skill install, preflight and scan; not the picker or the write phases |
+| opencode, Gemini CLI | `skills` CLI | installs; not run |
 
 `SKILL.md` names its folder `${CLAUDE_SKILL_DIR}`. Claude Code fills that in; other agents are told to use the folder's absolute path.
+
+Opening this repo in an agent also works: `.agents/skills/`, `.claude/skills/` and `.opencode/skills/` each hold a link to `skills/fallback404/`. On Windows, git needs `core.symlinks` (Developer Mode or an admin shell) to check those links out; without it they are plain text files and only that opening-the-repo case is affected, not the installs above.
 
 ## Use it
 
@@ -143,7 +152,10 @@ Details: [`skills/fallback404/reference/output-rules.md`](skills/fallback404/ref
 ## What's in this repo
 
 - `skills/fallback404/`: the skill (`SKILL.md`), its reference notes, the house style (characters, layouts, motion) and the Node scripts it runs
-- `.claude-plugin/`: plugin manifest and marketplace catalog
+- `.claude-plugin/`: Claude Code plugin manifest and marketplace catalog (Codex reads the same catalog)
+- `.codex-plugin/`: Codex plugin manifest
+- `plugin.json`: the same manifest in the [Agent Plugins](https://agent-plugins.org) format
+- `.agents/`, `.claude/`, `.opencode/`: links to `skills/fallback404/`, so each agent finds the skill when it opens this repo
 - `assets/`: images for this README
 - `.github/`: issue templates
 - `LICENSE`: MIT

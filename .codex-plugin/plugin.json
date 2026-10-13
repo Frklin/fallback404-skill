@@ -1,0 +1,29 @@
+{
+  "name": "fallback404",
+  "version": "0.1.1",
+  "description": "Finds missing 404, loading and error states in a Next.js App Router app, fixes soft 404s, and designs on-brand replacements with you on a picker page.",
+  "author": { "name": "Fallback404" },
+  "license": "MIT",
+  "homepage": "https://github.com/Frklin/fallback404-skill",
+  "repository": "https://github.com/Frklin/fallback404-skill",
+  "keywords": ["nextjs", "app-router", "404", "not-found", "loading", "error-pages", "skill"],
+  "skills": "./skills/",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Fallback404",
+        "shortDescription": "Find and design the missing 404, loading and error pages of your Next.js app.",
+        "longDescription": "Scans a Next.js App Router app for missing not-found, loading and error states and for 404 pages that answer HTTP 200, shows them on a picker page, designs on-brand replacements with you and writes them on a new git branch. Nothing is committed.",
+        "developerName": "Fallback404",
+        "category": "Coding",
+        "capabilities": ["Read", "Write", "Execute"],
+        "websiteURL": "https://fallback404-beta.vercel.app",
+        "defaultPrompt": [
+          "Add my missing 404 pages.",
+          "Fix the soft 404s in this app.",
+          "Give my dashboard a loading state."
+        ]
+      }
+    }
+  }
+}
