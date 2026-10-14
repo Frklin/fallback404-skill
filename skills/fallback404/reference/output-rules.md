@@ -6,20 +6,20 @@ Every file Fallback404 writes follows these rules. `check.mjs` enforces each by 
 | --- | --- | --- |
 | `svg-aria-hidden` | Illustrations are decorative (SVG or a composition of the site's own components) | `aria-hidden="true"` and `focusable="false"` on every `<svg>`; the message is real HTML text beside it |
 | `svg-static-id` | Ids are unique per instance | `const uid = useId().replace(/[^\w-]/g, '')`, then `` id={`f404-${uid}-shade`} `` and `` fill={`url(#f404-${uid}-shade)`} `` |
-| `color-literal` | Every color comes from a token, in light and dark | components use only `var(--f404-<role>)`, `currentColor`, `none`, `transparent`; literal colors live only in `--f404-*` definitions in `fallback404.css` |
-| `copy-literal` | Visible text lives in `copy.ts` | no text between JSX tags in states and illustrations; `alt`, `title`, `aria-label`, `placeholder` come from `copy` too |
+| `color-literal` | Every color comes from a token, in light and dark | Fallback404 files use only `var(--f404-<role>)`, the site's own tokens or theme classes, `currentColor`, `none`, `transparent`; literal colors live only in `--f404-*` definitions in `fallback404.css` |
+| `copy-literal` | Visible text lives in the flow's `copy.ts` | no text between JSX tags in flow components (inside a `data-f404-art` scene is exempt); `alt`, `title`, `aria-label`, `placeholder` come from the flow's `copy.ts` too |
 | `state-h1` | Not-found and error screens have a real heading | one `<h1>` with the message |
 | `loader-status` | Screen readers hear "loading" | `role="status"` (or `aria-busy`) with visually hidden text or an `aria-label` from `copy.ts` |
 | `loader-box` | No layout shift | the loader root has the `f404-loader` class, and `.f404-loader` has a `min-block-size`, `block-size`, `height` or `aspect-ratio` |
-| `loader-budget` | Loaders stay light | the loader, what it imports and `fallback404.css` stay within 15 KB gzipped |
+| `loader-budget` | Loaders stay light | the loader, what it imports relatively and the Fallback404 CSS stay within 15 KB gzipped |
 | `motion-reduced` | Motion stops when people ask | every animated selector also sits in a `@media (prefers-reduced-motion: reduce)` rule with `animation: none` |
-| `client-directive` | Error boundaries are Client Components | `'use client'` in the error and global-error wrappers, `ErrorState`, `GlobalErrorState` and the preview's `client` file |
+| `client-directive` | Error boundaries are Client Components | `'use client'` in the error and global-error wrappers, flow `ErrorState` and `GlobalErrorState` components and the preview's `client` file |
 | `global-error-document` | global-error replaces the root layout | it renders `<html lang>` and `<body>` |
 | `error-prop` | Use the prop this Next.js passes | `retry` from 16.3, `reset` before; the wrappers pass it on as `retry` |
 | `missing-route-static` | The proxy rewrite target is a build-time 404 | unconditional `notFound()`, no params, `instant = false` with Cache Components on 16.3+ |
 | `missing-route-unrouted` | Under a root `loading.*`, the rewrite target stays unrouted | no page in `app/fallback404-missing/` when the scan left it out |
-| `section-copy` | Fixed sections get their own 404 text | every approved section fix has an entry in `copy.notFound.sections`, and `NotFound` renders `NotFoundText` |
-| `motif-aria-hidden` | UI motifs are decorative | the motif is wrapped in `<div aria-hidden="true" data-f404-motif>`; motifs are exempt from `copy-literal` |
+| `section-flow` | Fixed sections get their own design | every approved section fix has `flows/<slug>/NotFound`; the router shows it on the root not-found page |
+| `decorative-aria-hidden` | Scenes built from the site's components are decorative | an element marked `data-f404-art` also has `aria-hidden="true"` |
 | `preview-prod-404` | The preview page never ships | `notFound()` when `NODE_ENV === 'production'` |
 | `write-scope` | Fallback404 touches only its files and approved user files | anything else changed since the branch was created is flagged |
 

@@ -20,7 +20,7 @@ What follows:
 - With Cache Components, the only real 404 for a dynamic URL is a proxy existence check that rewrites to `/fallback404-missing`.
 - A client page, or any page under a `loading.js`, cannot answer 404 with `notFound()`: its real 404 comes from the proxy check too.
 - Never add a `loading.tsx` above a dynamic route whose 404 is real today (status `real` in scan.json): it turns the 404 into a 200. The scan already marks those findings report-only.
-- Page-level 404s ship an empty HTML body until JavaScript runs, so check the text in a browser (`shoot.mjs`), never in raw HTML.
+- Page-level 404s ship an empty HTML body until JavaScript runs, so check the text in a browser (`shoot.mjs`), never in raw HTML. On 16.4 this includes the `/fallback404-missing` rewrite target, with Cache Components on or off (measured Oct 14, 2026): its not-found body is only in the RSC payload. Unknown URLs, which the root not-found answers, ship full HTML.
 
 ## The proxy pattern
 
@@ -79,9 +79,9 @@ Rules:
 
 `write.mjs` applies this table to the files it writes. State components always take `{ error, retry }`; the wrappers pass `reset` on as `retry` on older versions.
 
-## Status checks (phase 7)
+## Status checks (phase 8)
 
 - Dev: `/fallback404-check-<random>` → 404 with the not-found `<h1>` text; each proxy-fixed route with a made-up id → 404 with the same text; `/fallback404-preview` → 200.
 - Production (`next build`, then `next start -p <free port>`): the same, plus `/fallback404-preview` → 404. Under a root `loading.js`, Next.js 16.3.6 answers 200 + noindex there (16.4 answers 404), with the not-found text: the gallery still never renders in production, so expect that and tell the user.
 - Prefix every path with `config.basePath`, or set `basePath` in the shoot plan.
-- Section text: the root not-found page is the same HTML for every URL; `NotFoundText` swaps in the section's text after hydration, so check it in a browser (`shoot.mjs`), never in raw HTML.
+- Section designs: the root not-found page is the same HTML for every URL; `NotFoundRouter` holds every section's design, its inline script shows the one for the URL before the first paint, and the gate keeps only that one after hydration. Check it in a browser (`shoot.mjs`), never in raw HTML. When the proxy rewrites to an unrouted path (the scan left `app/fallback404-missing/` out), add a check with `"hydrate": false`: the server HTML must already show the section's design. When it rewrites to `/fallback404-missing`, the body arrives with JavaScript and the gate picks the section on its first render, so there is no first paint to check.

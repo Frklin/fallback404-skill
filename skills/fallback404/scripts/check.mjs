@@ -21,10 +21,14 @@ import {
   unwrap,
 } from './lib/ast.mjs'
 import { CliError, isMain, runCli, stringFlag } from './lib/cli.mjs'
+import { ROOT_NOT_FOUND, componentFile, isSectionFix } from './lib/flows.mjs'
 import { parseCss, walkCss } from './lib/css.mjs'
 import { readJsonIfExists, readText, walk, workspacePath } from './lib/fs.mjs'
 import { changedPaths, git, isGitRepo } from './lib/git.mjs'
 import { atLeast } from './lib/project.mjs'
+
+/** First line of the site's own root not-found page, moved unchanged into flows/root-not-found/ so the router can show it. */
+export const MOVED_MARKER = "// Fallback404: the site's own page, moved here unchanged from "
 
 const HEX = /#[0-9a-f]{3,8}\b/i
 const HEX_ONLY = /^#[0-9a-f]{3,8}$/i
@@ -58,16 +62,22 @@ function hasElement(ast, name) {
   return found
 }
 
+// A component in a flow folder, final or a variant: flows/<slug>/[variants/]<Name>[.v<k>].tsx; its text: copy[.v<k>].ts.
+const FLOW_COMPONENT = /^flows\/[a-z0-9-]+\/(?:variants\/)?([A-Za-z]+)(?:\.v\d+)?\.[jt]sx$/
+const FLOW_COPY = /^flows\/[a-z0-9-]+\/(?:variants\/)?copy(?:\.v\d+)?\.[jt]s$/
+const STATE_NAMES = new Set(['NotFound', 'ErrorState', 'GlobalErrorState'])
+const CLIENT_NAMES = new Set(['ErrorState', 'GlobalErrorState'])
+
 function pathKind(file, scan) {
   const rel = file.startsWith(`${scan.componentsDir}/`) ? file.slice(scan.componentsDir.length + 1) : null
+  const name = rel === null ? null : (FLOW_COMPONENT.exec(rel)?.[1] ?? null)
   return {
     component: rel !== null,
-    visual: rel !== null && (rel.startsWith('illustrations/') || rel.startsWith('states/')),
-    state: rel !== null && /^states\/(?:NotFound|ErrorState|GlobalErrorState|variants\/NotFound\.v\d+)\.[jt]sx$/.test(rel),
-    clientState: rel !== null && /^states\/(?:ErrorState|GlobalErrorState)\.[jt]sx$/.test(rel),
-    loader: rel !== null && /^states\/Loader\.[jt]sx$/.test(rel),
-    copy: rel !== null && /^copy\.[jt]s$/.test(rel),
-    motif: rel !== null && /^illustrations\/(?:variants\/)?Motif(?:\.v\d+)?\.[jt]sx$/.test(rel),
+    visual: name !== null,
+    state: STATE_NAMES.has(name),
+    clientState: CLIENT_NAMES.has(name),
+    loader: name === 'Loader',
+    copy: rel !== null && FLOW_COPY.test(rel),
   }
 }
 
@@ -124,10 +134,11 @@ function checkColorsInCode(file, ast, add) {
 
 function checkCopy(file, ast, add) {
   traverse(ast.program, (node) => {
-    if (node.type === 'JSXText' && node.value.trim() !== '') add(file, lineOf(node), 'copy-literal', `Visible text "${node.value.trim().slice(0, 40)}" belongs in copy.ts.`)
+    if (node.type === 'JSXElement' && jsxAttribute(node.openingElement, 'data-f404-art')) return false
+    if (node.type === 'JSXText' && node.value.trim() !== '') add(file, lineOf(node), 'copy-literal', `Visible text "${node.value.trim().slice(0, 40)}" belongs in the flow's copy.ts.`)
     if (node.type === 'JSXAttribute' && TEXT_ATTRIBUTES.includes(jsxName(node.name))) {
       const value = jsxAttributeValue(node)
-      if (typeof value === 'string' && value.trim() !== '') add(file, lineOf(node), 'copy-literal', `${jsxName(node.name)}="${value.slice(0, 40)}" belongs in copy.ts.`)
+      if (typeof value === 'string' && value.trim() !== '') add(file, lineOf(node), 'copy-literal', `${jsxName(node.name)}="${value.slice(0, 40)}" belongs in the flow's copy.ts.`)
     }
   })
 }
@@ -181,7 +192,7 @@ async function checkLoaderBudget(root, file, source, css, ast, add) {
     }
   }
   const bytes = gzipSync(total).length
-  if (bytes > LOADER_BUDGET) add(file, 1, 'loader-budget', `The loader, what it imports and fallback404.css are ${(bytes / 1024).toFixed(1)} KB gzipped; the budget is 15 KB.`)
+  if (bytes > LOADER_BUDGET) add(file, 1, 'loader-budget', `The loader, what it imports and the Fallback404 CSS are ${(bytes / 1024).toFixed(1)} KB gzipped; the budget is 15 KB.`)
 }
 
 /** Selectors that animate without a prefers-reduced-motion: reduce rule turning their animation off. */
@@ -312,61 +323,28 @@ async function checkScope(root, scan, plan, owned, add, warnings) {
   }
 }
 
-function checkMotif(file, ast, add) {
-  let wrapped = false
+/** A scene composed from the site's components is decorative: hidden from assistive tech, the message lives in real text. */
+function checkArt(file, ast, add) {
   traverse(ast.program, (node) => {
-    if (wrapped || node.type !== 'JSXOpeningElement' || !jsxAttribute(node, 'data-f404-motif')) return
+    if (node.type !== 'JSXOpeningElement' || !jsxAttribute(node, 'data-f404-art')) return
     const hidden = jsxAttributeValue(jsxAttribute(node, 'aria-hidden'))
-    if (hidden === true || hidden === 'true') wrapped = true
+    if (hidden !== true && hidden !== 'true') add(file, lineOf(node), 'decorative-aria-hidden', 'Add aria-hidden="true" next to data-f404-art: the scene is decorative, and the message lives in real text.')
   })
-  if (!wrapped) add(file, 1, 'motif-aria-hidden', 'Wrap the motif in <div aria-hidden="true" data-f404-motif>: it is decorative, and the message lives in real text.')
 }
 
-const propertyName = (node) => (node.key.type === 'Identifier' ? node.key.name : typeof node.key.value === 'string' ? node.key.value : null)
-
-/** Routes listed in copy.notFound.sections. */
-function sectionRoutes(ast) {
-  const routes = new Set()
-  traverse(ast.program, (node) => {
-    if (node.type !== 'ObjectProperty' || propertyName(node) !== 'sections' || node.value.type !== 'ArrayExpression') return
-    for (const element of node.value.elements) {
-      if (element?.type !== 'ObjectExpression') continue
-      const route = element.properties.find((property) => property.type === 'ObjectProperty' && propertyName(property) === 'route')
-      const value = route ? literalValue(route.value) : null
-      if (typeof value === 'string') routes.add(value)
-    }
-  })
-  return routes
-}
-
-/** Every approved section fix needs its own 404 text, and NotFound must show it (spec section 4.2). */
-async function checkSectionCopy(root, scan, plan, add) {
-  const ext = scan.typescript ? 'tsx' : 'jsx'
-  const notFoundFile = `${scan.componentsDir}/states/NotFound.${ext}`
-  const notFound = await readText(root, notFoundFile)
-  // The user's own root 404: fixed sections show it, without their own text (the picker said so).
-  if (notFound === null) return
+/** Every approved section fix needs its design; the router shows it on the root not-found page (spec section 8.2). */
+async function checkSectionFlows(root, scan, plan, add, warnings) {
+  const findings = new Map((scan.findings ?? []).map((finding) => [finding.id, finding]))
   const approved = new Set(plan.approved ?? [])
-  const fixed = (scan.findings ?? []).filter((finding) => approved.has(finding.id) && (finding.kind === 'soft-404' || finding.kind === 'no-notfound-candidate'))
-  if (fixed.length === 0) return
-  const copyFile = `${scan.componentsDir}/copy.${scan.typescript ? 'ts' : 'js'}`
-  const copySource = await readText(root, copyFile)
-  let routes = new Set()
-  try {
-    if (copySource !== null) routes = sectionRoutes(parseSource(copySource, copyFile))
-  } catch {
-    // A copy file that does not parse is already reported by the per-file checks.
+  const sections = (plan.flows ?? []).filter((flow) => approved.has(flow.rowId) && isSectionFix(findings.get(flow.rowId)))
+  for (const flow of sections) {
+    const file = componentFile(scan, flow.slug, 'not-found')
+    if ((await readText(root, file)) === null) add(file, 1, 'section-flow', `The fixed section ${flow.route} needs its design in ${file}: promote the picked option there.`)
   }
-  for (const { route } of fixed) {
-    if (!routes.has(route)) add(copyFile, 1, 'section-copy', `Add { route: '${route}', title, body } to copy.notFound.sections: the fixed section ${route} needs its own 404 text.`)
+  const rootDesign = componentFile(scan, ROOT_NOT_FOUND, 'not-found')
+  if (sections.length > 0 && (await readText(root, rootDesign)) === null) {
+    warnings.push(`Fixed sections answer a real 404 but show the site's own root 404 page: there is no ${rootDesign}, so there is no router. Tell the user.`)
   }
-  let usesText = false
-  try {
-    usesText = hasElement(parseSource(notFound, notFoundFile), 'NotFoundText')
-  } catch {
-    usesText = true
-  }
-  if (!usesText) add(notFoundFile, 1, 'section-copy', 'Render <NotFoundText text={copy.notFound} sections={copy.notFound.sections} /> for the heading and body, so fixed sections show their own text.')
 }
 
 export async function runChecks(root) {
@@ -378,10 +356,17 @@ export async function runChecks(root) {
   const warnings = []
   const add = (file, line, rule, message) => violations.push({ file, line, rule, message })
   const cssFile = `${scan.componentsDir}/fallback404.css`
-  const css = (await readText(root, cssFile)) ?? ''
-  const cssItems = parseCss(css)
-  if (css) checkCss(cssFile, cssItems, add)
-  const files = [...new Set([...(await walk(root, scan.componentsDir)), ...owned])].sort()
+  const componentFiles = await walk(root, scan.componentsDir)
+  let css = ''
+  const cssItems = []
+  for (const file of componentFiles.filter((path) => path.endsWith('.css')).sort()) {
+    const text = (await readText(root, file)) ?? ''
+    const items = parseCss(text)
+    checkCss(file, items, add)
+    css += `${text}\n`
+    cssItems.push(...items)
+  }
+  const files = [...new Set([...componentFiles, ...owned])].sort()
   for (const file of files) {
     if (!isCodeFile(file)) continue
     const source = await readText(root, file)
@@ -393,14 +378,16 @@ export async function runChecks(root) {
       add(file, 1, 'parse', `${file} does not parse: ${String(error.message).split('\n')[0]}`)
       continue
     }
+    // The site's own page, kept and moved here unchanged (changes.md): the user's code, not Fallback404's output.
+    if (source.startsWith(MOVED_MARKER)) continue
     const kind = pathKind(file, scan)
     if (kind.visual) {
       checkSvg(file, ast, add)
-      if (!kind.motif) checkCopy(file, ast, add)
+      checkCopy(file, ast, add)
+      checkArt(file, ast, add)
     }
-    if (kind.motif) checkMotif(file, ast, add)
     if (kind.component && !kind.copy) checkColorsInCode(file, ast, add)
-    if (kind.state && !hasElement(ast, 'h1') && !hasElement(ast, 'NotFoundText')) add(file, 1, 'state-h1', 'Not-found and error screens need a real <h1> with the message (or <NotFoundText>, which renders it).')
+    if (kind.state && !hasElement(ast, 'h1')) add(file, 1, 'state-h1', 'Not-found and error screens need a real <h1> with the message.')
     if (kind.loader) {
       checkLoader(file, ast, add)
       checkLoaderBox(file, source, cssFile, cssItems, add)
@@ -420,7 +407,7 @@ export async function runChecks(root) {
     }
   }
   await checkUnroutedTarget(root, scan, add)
-  await checkSectionCopy(root, scan, plan, add)
+  await checkSectionFlows(root, scan, plan, add, warnings)
   await checkScope(root, scan, plan, owned, add, warnings)
   return { ok: violations.length === 0, violations, warnings }
 }

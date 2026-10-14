@@ -1,6 +1,6 @@
 {
   "name": "fallback404",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Finds missing 404, loading and error states in a Next.js App Router app, fixes soft 404s, and designs on-brand replacements with you on a picker page.",
   "author": { "name": "Fallback404" },
   "license": "MIT",

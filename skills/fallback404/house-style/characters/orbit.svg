@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
-  <ellipse data-part="shadow" cx="120" cy="214" rx="56" ry="8" fill="var(--f404-line)"/>
-  <g data-part="body">
-    <circle cx="120" cy="128" r="52" fill="var(--f404-surface)" stroke="var(--f404-ink)" stroke-width="4" pathLength="1"/>
-    <ellipse cx="120" cy="128" rx="92" ry="26" fill="none" stroke="var(--f404-muted)" stroke-width="3" stroke-dasharray="6 8"/>
-  </g>
-  <circle data-part="prop" cx="208" cy="122" r="10" fill="var(--f404-accent)" stroke="var(--f404-ink)" stroke-width="3"/>
-</svg>

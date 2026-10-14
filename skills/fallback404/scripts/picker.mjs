@@ -19,10 +19,10 @@ const MIME_TYPES = { '.svg': 'image/svg+xml', '.png': 'image/png' }
 
 const USAGE = [
   'Usage: node picker.mjs <command> [options]',
-  '  create --project <name> [--options 3] [--plan logo,mascot,motion,page] [--open]',
+  '  create --project <name> [--options 3] [--plan coverage] [--open]',
   '  propose <manifest.json>',
   '  wait --step <id> [--timeout 540] [--interval 2] [--out <file>]',
-  '  plan --kinds mascot,motion,page',
+  '  plan --kinds flow-f1,flow-f2',
   '  complete [--summary <text>]',
   'Every command accepts --session-file <path> (default .fallback404/session.json).',
 ].join('\n')
@@ -299,6 +299,10 @@ export async function propose(ctx, positionals) {
   if (!Array.isArray(manifest.options) || manifest.options.length === 0) {
     throw new CliError('bad_manifest', 'The manifest needs a non-empty "options" list.')
   }
+  const currents = manifest.options.filter((option) => option.current === true)
+  if (currents.length > 1 || (currents.length === 1 && manifest.options[0].current !== true)) {
+    throw new CliError('bad_manifest', 'At most one option is the site\'s current page ("current": true), and it comes first.')
+  }
 
   // Every file is read and checked before the first request, so a bad manifest sends nothing.
   const folder = dirname(resolve(manifestPath))
@@ -326,6 +330,7 @@ export async function propose(ctx, positionals) {
     const form = new FormData()
     form.set('title', option.title ?? '')
     if (option.description) form.set('description', option.description)
+    if (option.current === true) form.set('current', 'true')
     for (const { theme, path, bytes } of files) {
       form.set(theme, new Blob([bytes], { type: MIME_TYPES[extname(path).toLowerCase()] }), basename(path))
     }

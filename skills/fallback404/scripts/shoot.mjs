@@ -3,6 +3,7 @@
 // never lands in the user's project:
 //   npx --yes --no-update-notifier -p playwright@1.64.0 node shoot.mjs <plan.json> [--status-only] [--root <dir>]
 // Without Playwright or a browser it reports { skipped: true } and exits 0; --status-only needs neither.
+// A check may set "hydrate": false (the framework's scripts are blocked) or "javaScript": false, to see the first paint.
 import { readFileSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
@@ -48,7 +49,14 @@ export function normalizePlan(plan) {
     baseUrl: plan.baseUrl.replace(/\/+$/, ''),
     out: typeof plan.out === 'string' ? plan.out : '.fallback404/shots',
     darkMode: plan.darkMode ?? { strategy: 'media' },
-    checks: (plan.checks ?? []).map((check) => ({ path: path(check.path), expectStatus: check.expectStatus ?? null, expectText: check.expectText ?? null })),
+    checks: (plan.checks ?? []).map((check) => ({
+      path: path(check.path),
+      expectStatus: check.expectStatus ?? null,
+      expectText: check.expectText ?? null,
+      // hydrate: false blocks the framework's scripts; javaScript: false turns JavaScript off. Both show the first paint.
+      hydrate: check.hydrate !== false,
+      javaScript: check.javaScript !== false,
+    })),
     shots,
   }
 }
@@ -87,7 +95,15 @@ export async function runStatusOnly(plan, fetchImpl = fetch) {
     } catch {
       // No answer: status stays null and the check fails.
     }
-    checks.push({ path: check.path, status, expectStatus: check.expectStatus, ok: check.expectStatus === null || status === check.expectStatus, text: check.expectText === null ? null : 'unverified' })
+    checks.push({
+      path: check.path,
+      status,
+      expectStatus: check.expectStatus,
+      ok: check.expectStatus === null || status === check.expectStatus,
+      text: check.expectText === null ? null : 'unverified',
+      hydrate: check.hydrate,
+      javaScript: check.javaScript,
+    })
   }
   return { skipped: false, statusOnly: true, checks, shots: [] }
 }
@@ -103,8 +119,10 @@ async function launch(chromium) {
   return null
 }
 
-async function visit(browser, plan, path, theme, viewport) {
-  const context = await browser.newContext({ colorScheme: theme, viewport, reducedMotion: 'no-preference' })
+async function visit(browser, plan, path, theme, viewport, { hydrate = true, javaScript = true } = {}) {
+  const context = await browser.newContext({ colorScheme: theme, viewport, reducedMotion: 'no-preference', javaScriptEnabled: javaScript })
+  // Without the framework's scripts, only the server HTML and its inline scripts run: what a visitor sees first.
+  if (!hydrate) await context.route('**/_next/static/**/*.js', (route) => route.abort())
   const script = themeScript(plan.darkMode, theme)
   if (script) await context.addInitScript(script)
   const page = await context.newPage()
@@ -126,12 +144,12 @@ export async function runShots(plan, chromium, root) {
   const report = { skipped: false, checks: [], shots: [] }
   try {
     for (const check of plan.checks) {
-      const page = await visit(browser, plan, check.path, 'light', { width: 1280, height: 800 })
+      const page = await visit(browser, plan, check.path, 'light', { width: 1280, height: 800 }, check)
       try {
         const body = check.expectText === null ? '' : await page.page.locator('body').first().innerText().catch(() => '')
         const text = check.expectText === null ? null : body.includes(check.expectText) ? 'found' : 'missing'
         const ok = (check.expectStatus === null || page.status === check.expectStatus) && text !== 'missing'
-        report.checks.push({ path: check.path, status: page.status, expectStatus: check.expectStatus, ok, text, ...page.errors() })
+        report.checks.push({ path: check.path, status: page.status, expectStatus: check.expectStatus, ok, text, hydrate: check.hydrate, javaScript: check.javaScript, ...page.errors() })
       } finally {
         await page.context.close()
       }

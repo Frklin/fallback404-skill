@@ -2,7 +2,7 @@
 import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
-export const SKILL_VERSION = '0.1.2'
+export const SKILL_VERSION = '0.2.0'
 
 export class CliError extends Error {
   constructor(code, message) {
