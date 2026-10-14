@@ -46,6 +46,16 @@ function proposalCell(finding) {
   return `add ${code('notFound()')} in ${code(finding.file)} (diff shown first)`
 }
 
+// What Claude does with each finding kind before the coverage page, listed only for the kinds the report shows.
+const LEGEND = {
+  'soft-404': 'soft-404: read the page and its data helper (`notFound.via` in scan.json): how can a proxy test cheaply that the record exists? For a "needs review" one, decide whether it is really soft; drop it with `--drop` if not.',
+  'no-notfound-candidate': 'no-notfound-candidate: read the page: does a missing record render an empty page or crash? Drop it with `--drop` if the page handles it.',
+  'missing-loading': 'missing-loading: nothing to read; the coverage page offers it.',
+  'weak-suspense-fallback': 'weak-suspense-fallback: nothing to read; a yes at the review lists the page diff that sets `fallback={<Loader inline />}`.',
+  'existing-state': 'existing-state: covered today; a redesign replaces the file with a wrapper after the pick.',
+  unsupported: 'unsupported: tell the user; nothing else to do.',
+}
+
 export function renderReport(scan) {
   const cc = scan.config.cacheComponents === true ? 'on' : scan.config.cacheComponents === false ? 'off' : 'unknown'
   const lines = ['## Fallback404 coverage', '', `Next.js ${scan.next.version} · App Router in ${code(`${scan.appDir}/`)} · Cache Components ${cc}`, '']
@@ -67,5 +77,7 @@ export function renderReport(scan) {
   const edited = scan.owned.filter((item) => item.status === 'edited')
   if (edited.length > 0) lines.push('', 'Changed by you since the last Fallback404 run (left alone):', ...edited.map((item) => `- ${code(item.file)}`))
   if (scan.warnings.length > 0) lines.push('', 'Warnings:', ...scan.warnings.map((warning) => `- ${warning}`))
+  const kinds = [...new Set(scan.findings.map((finding) => finding.kind))].filter((kind) => LEGEND[kind])
+  if (kinds.length > 0) lines.push('', '## What to do', '', ...kinds.map((kind) => `- ${LEGEND[kind]}`))
   return lines.join('\n')
 }

@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 // Fallback404 picker client, run by the Fallback404 Skill to show options on the picker page and read picks back.
-// Node >= 18, no dependencies. Prints one JSON line on stdout; errors go to stderr as {"error":{code,message}}.
-// Exit codes: 0 done, 1 error, 3 `wait` timed out (run it again).
+// Node >= 20, no dependencies beyond the sibling scripts. Prints one JSON line on stdout; errors go to stderr as {"error":{code,message}}.
+// Exit codes: 0 done, 1 error, 3 `wait` or `step` timed out (run `wait` again, or `step … --resume`).
 
 import { spawn } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { readJsonIfExists, toPosix, workspacePath } from './lib/fs.mjs'
+import { promote } from './lib/promote.mjs'
+import { readState, setPhase, update as updateState } from './state.mjs'
 
 export const CLIENT_VERSION = 1
 export const DEFAULT_API_URL = 'https://fallback404-beta.vercel.app'
@@ -22,9 +25,10 @@ const USAGE = [
   '  create --project <name> [--options 3] [--plan coverage] [--open]',
   '  propose <manifest.json>',
   '  wait --step <id> [--timeout 540] [--interval 2] [--out <file>]',
+  '  step <manifest.json> [--round <n>] [--resume] [--timeout 540] [--interval 2]',
   '  plan --kinds flow-f1,flow-f2',
   '  complete [--summary <text>]',
-  'Every command accepts --session-file <path> (default .fallback404/session.json).',
+  'Every command accepts --session-file <path> (default .fallback404/session.json) and --root <dir> (default: the folder above the session file\'s).',
 ].join('\n')
 
 export class CliError extends Error {
@@ -384,6 +388,76 @@ function isTransient(error) {
   return error instanceof CliError && (error.code === 'network' || error.code === 'internal' || /^http_5\d\d$/.test(error.code))
 }
 
+/** The project root a step works in: --root, else the parent of the session file's folder (.fallback404/). */
+function rootFor(ctx, flags) {
+  return resolve(typeof flags.root === 'string' ? flags.root : dirname(dirname(resolve(ctx.sessionFile))))
+}
+
+/**
+ * One picker step end to end: propose the manifest, record the step, wait for the pick, record it and promote the
+ * picked variant to the flow's final files. Exit 3 on timeout: run again with --resume (no second proposal).
+ */
+/** The variant number of a non-current option: its "variant" field, else the v<k> prefix of its file names; null when neither says. */
+export function variantOf(option) {
+  if (Number.isInteger(option.variant) && option.variant > 0) return option.variant
+  for (const theme of THEMES) {
+    const match = /^v(\d+)[-.]/.exec(basename(String(option.assets?.[theme] ?? '')))
+    if (match) return Number(match[1])
+  }
+  return null
+}
+
+export async function step(ctx, positionals, flags) {
+  const manifestPath = positionals[0]
+  if (!manifestPath) throw new CliError('bad_args', `Missing manifest path.\n${USAGE}`)
+  const root = rootFor(ctx, flags)
+  let manifest
+  try {
+    manifest = JSON.parse(await ctx.readFile(manifestPath, 'utf8'))
+  } catch (error) {
+    throw new CliError('bad_manifest', `Could not read ${manifestPath}: ${error.message}`)
+  }
+  if (typeof manifest.kind !== 'string') throw new CliError('bad_manifest', 'The manifest needs a "kind" (the flow kind from plan.json).')
+  // Promotion reads variants/<Component>.v<k>: every new option must say which k it is, before anything is proposed.
+  const variants = (manifest.options ?? []).map((option, index) => {
+    if (option.current === true) return null
+    const variant = variantOf(option)
+    if (variant === null) throw new CliError('bad_manifest', `Option ${index + 1} ("${option.title ?? ''}") has no variant number: add "variant": k to it, or name its files v<k>-light.png and v<k>-dark.png.`)
+    return variant
+  })
+  const dir = toPosix(relative(root, dirname(resolve(manifestPath))))
+  const round = Number(flags.round ?? /-r(\d+)$/.exec(dir)?.[1] ?? 1)
+  let stepId
+  if (flags.resume === true) {
+    const recorded = (await readState(root)).steps.find((item) => item.kind === manifest.kind && item.dir === dir)
+    if (!recorded) throw new CliError('no_step', `No step was recorded for ${manifest.kind} in ${dir}; run step without --resume.`)
+    stepId = recorded.id
+  } else {
+    stepId = (await propose(ctx, [manifestPath])).stepId
+    await updateState(root, (state) => {
+      state.phase = 'design'
+      state.steps = [...state.steps.filter((item) => item.id !== stepId), { kind: manifest.kind, id: stepId, round, dir }]
+    })
+  }
+  const decision = await wait(ctx, { step: stepId, timeout: flags.timeout, interval: flags.interval })
+  if (decision.status === 'waiting') return { status: 'waiting', stepId, kind: manifest.kind, resume: `picker.mjs step ${manifestPath} --resume` }
+  if (decision.status === 'rejected') return { status: 'rejected', stepId, kind: manifest.kind, round, note: decision.note }
+  const option = manifest.options?.[decision.position - 1] ?? {}
+  const current = option.current === true
+  const title = option.title ?? ''
+  await updateState(root, (state) => {
+    state.picks = { ...state.picks, [manifest.kind]: { title, position: decision.position, ...(current ? { current: true } : {}) } }
+  })
+  const picked = { status: 'picked', stepId, kind: manifest.kind, round, position: decision.position, title, current, note: decision.note }
+  const flow = (await readJsonIfExists(workspacePath(root, 'plan.json')))?.flows?.find((item) => item.kind === manifest.kind)
+  if (!flow) return { ...picked, promoted: [], warning: 'plan.json has no flow of this kind, so nothing was promoted.' }
+  if (current) return { ...picked, promoted: [], ...(flow.status === 'soft' ? { port: true } : {}) }
+  const scan = await readJsonIfExists(workspacePath(root, 'scan.json'))
+  if (!scan) throw new CliError('no_scan', 'Run scan.mjs first: .fallback404/scan.json is missing.')
+  const variant = variants[decision.position - 1]
+  return { ...picked, variant, promoted: await promote(root, scan, flow, variant) }
+}
+
 export async function plan(ctx, flags) {
   const kinds = requireFlag(flags, 'kinds')
     .split(',')
@@ -395,6 +469,8 @@ export async function plan(ctx, flags) {
 
 export async function complete(ctx, flags) {
   const session = await loadSession(ctx)
+  const root = rootFor(ctx, flags)
+  if (await readJsonIfExists(workspacePath(root, 'state.json'))) await setPhase(root, 'finish')
   const summary = typeof flags.summary === 'string' ? flags.summary : undefined
   return request(ctx, apiUrlFor(ctx, session), 'POST', `/api/v1/sessions/${session.sessionId}/complete`, {
     token: session.token,
@@ -411,6 +487,7 @@ export async function main(argv, ctx = defaultContext()) {
     if (command === 'create') result = await create(context, flags)
     else if (command === 'propose') result = await propose(context, positionals)
     else if (command === 'wait') result = await wait(context, flags)
+    else if (command === 'step') result = await step(context, positionals, flags)
     else if (command === 'plan') result = await plan(context, flags)
     else if (command === 'complete') result = await complete(context, flags)
     else throw new CliError('bad_args', USAGE)

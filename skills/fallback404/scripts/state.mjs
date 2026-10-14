@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// Fallback404 run state in .fallback404/state.json: the phase reached, picker steps and picks, so a run can resume.
+// Fallback404 run state in .fallback404/state.json: the phase reached (recorded by the scripts as they run), picker steps
+// and picks, so a run can resume.
 // Usage: node state.mjs get | phase <name> | step <kind> --id <stepId> --round <n> --dir <path>
 //                      | pick <kind> --title <title> [--position <n>] [--current] [--root <dir>]
 import { resolve } from 'node:path'
 import { CliError, isMain, requireString, runCli, stringFlag } from './lib/cli.mjs'
 import { prepareWrite, readJsonIfExists, workspacePath, writeJsonInside } from './lib/fs.mjs'
 
-export const PHASES = ['preflight', 'scan', 'coverage', 'understand', 'branch', 'design', 'review', 'write', 'check', 'finish']
+export const PHASES = ['scan', 'coverage', 'branch', 'design', 'review', 'write', 'check', 'finish']
 const FLOW_KIND = /^flow-[a-z0-9-]{1,19}$/
 /** The coverage step, or one flow step (`flow-<row id>`, from plan.json). */
 export const isKind = (kind) => kind === 'coverage' || FLOW_KIND.test(kind ?? '')
@@ -27,16 +28,18 @@ export async function update(root, change, now = () => new Date()) {
   return state
 }
 
+/** Records the phase a script just entered; the scripts call this themselves, so SKILL.md never has to. */
+export async function setPhase(root, phase) {
+  if (!PHASES.includes(phase)) throw new CliError('bad_args', `Unknown phase "${phase}". Phases: ${PHASES.join(', ')}.`)
+  return update(root, (state) => {
+    state.phase = phase
+  })
+}
+
 export async function main({ command, positionals, flags }) {
   const root = resolve(stringFlag(flags, 'root', '.'))
   if (command === 'get') return readState(root)
-  if (command === 'phase') {
-    const phase = positionals[0]
-    if (!PHASES.includes(phase)) throw new CliError('bad_args', `Unknown phase "${phase}". Phases: ${PHASES.join(', ')}.`)
-    return update(root, (state) => {
-      state.phase = phase
-    })
-  }
+  if (command === 'phase') return setPhase(root, positionals[0])
   if (command === 'step' || command === 'pick') {
     const kind = positionals[0]
     if (!isKind(kind)) throw new CliError('bad_args', `Unknown step kind "${kind}". Kinds: coverage, or a flow kind from plan.json (flow-<row id>).`)

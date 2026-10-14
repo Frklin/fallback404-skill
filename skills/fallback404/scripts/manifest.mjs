@@ -51,13 +51,17 @@ export async function buildManifest(root, now = () => new Date()) {
   }
 }
 
-export async function main({ flags }) {
-  const root = resolve(stringFlag(flags, 'root', '.'))
+/** Builds and writes <componentsDir>/manifest.json; write.mjs apply calls this too. */
+export async function writeManifest(root) {
   const manifest = await buildManifest(root)
   const { componentsDir } = await readScan(root)
   const file = `${componentsDir}/manifest.json`
   await writeJsonInside(root, file, manifest)
   return { written: file, owned: Object.keys(manifest.owned).length, flows: manifest.flows.length }
+}
+
+export async function main({ flags }) {
+  return writeManifest(resolve(stringFlag(flags, 'root', '.')))
 }
 
 if (isMain(import.meta.url)) process.exitCode = await runCli(main, process.argv.slice(2))

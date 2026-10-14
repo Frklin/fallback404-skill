@@ -2,7 +2,8 @@
 // (var(), color-mix(), most named colors), so callers can fall back to reading the CSS themselves.
 
 const NAMED = { white: '#ffffff', black: '#000000', transparent: '#00000000' }
-const BARE_HSL = /^(-?[\d.]+)(?:deg)?\s+([\d.]+)%\s+([\d.]+)%$/
+/** A bare "h s% l%" triplet, as shadcn and Tailwind v3 store tokens for hsl(var(--x)). */
+export const BARE_HSL = /^(-?[\d.]+)(?:deg)?\s+([\d.]+)%\s+([\d.]+)%$/
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 const hex2 = (value) => Math.round(clamp(value, 0, 255)).toString(16).padStart(2, '0')
@@ -112,4 +113,50 @@ export function toHex(input) {
     default:
       return null
   }
+}
+
+/** '#rrggbb' without an alpha byte; null for anything that is not a color toHex understands. */
+export function opaque(hex) {
+  const full = typeof hex === 'string' ? toHex(hex) : null
+  return full ? full.slice(0, 7) : null
+}
+
+function channels(hex) {
+  const value = opaque(hex)
+  if (!value) return null
+  return [1, 3, 5].map((start) => parseInt(value.slice(start, start + 2), 16))
+}
+
+/** WCAG relative luminance of a color (0–1); null when it is not a color. */
+export function luminance(hex) {
+  const rgb = channels(hex)
+  if (!rgb) return null
+  const [r, g, b] = rgb.map((channel) => {
+    const c = channel / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** WCAG contrast ratio between two colors (1–21), alpha ignored; null when either is not a color. */
+export function contrastRatio(hexA, hexB) {
+  const a = luminance(hexA)
+  const b = luminance(hexB)
+  if (a === null || b === null) return null
+  const [light, dark] = a > b ? [a, b] : [b, a]
+  return (light + 0.05) / (dark + 0.05)
+}
+
+/** The color `t` (0–1) of the way from `hexA` to `hexB`, as an opaque hex. */
+export function mix(hexA, hexB, t) {
+  const a = channels(hexA)
+  const b = channels(hexB)
+  if (!a || !b) return null
+  const amount = clamp(t, 0, 1)
+  return hexFrom(...a.map((channel, index) => channel + (b[index] - channel) * amount))
+}
+
+/** White or black, whichever reads better on `bg`. */
+export function readableOn(bg) {
+  return contrastRatio('#ffffff', bg) >= contrastRatio('#000000', bg) ? '#ffffff' : '#000000'
 }

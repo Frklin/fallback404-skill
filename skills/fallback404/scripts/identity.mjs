@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Fallback404 identity reader: logo files, color tokens in light and dark, the dark-mode switch, fonts, language, name
-// and copy samples, read from the repo without running it. Claude turns the result into brand-kit.json.
-// Usage: node identity.mjs [--out <file>] [--root <dir>]
+// and copy samples, read from the repo without running it. With --write it also turns the result into brand-kit.json
+// (eight color roles, checked for contrast). --css writes the shared <componentsDir>/fallback404.css from that kit: it
+// lands in the repo, so branch.mjs create runs it once the branch exists. Nobody writes either by hand.
+// Usage: node identity.mjs [--write] [--out <file>] [--root <dir>] | --css [--root <dir>]
 import { readFile } from 'node:fs/promises'
 import { join, posix, relative, resolve } from 'node:path'
 import {
@@ -22,10 +24,11 @@ import {
 import { CliError, isMain, runCli, stringFlag } from './lib/cli.mjs'
 import { toHex } from './lib/color.mjs'
 import { extractTokens, resolveValue } from './lib/css.mjs'
-import { exists, readText, walk, workspacePath, writeJsonInside } from './lib/fs.mjs'
+import { exists, readJsonIfExists, readText, walk, workspacePath, writeJsonInside, writeTextInside } from './lib/fs.mjs'
 import { specifierPath } from './lib/modules.mjs'
 import { exportedConfigObject } from './lib/next-config.mjs'
 import { loadProject } from './lib/project.mjs'
+import { pickRoles, renderBrandKit, renderFallbackCss } from './lib/roles.mjs'
 
 const CODE_EXTENSIONS = ['tsx', 'jsx', 'ts', 'js']
 const IMAGE = /\.(?:svg|png|webp|jpe?g|gif|avif|ico)$/i
@@ -280,12 +283,29 @@ export async function collectIdentity(root) {
   }
 }
 
+/** The font variable the brand kit's body font refers to, as renderFallbackCss expects it. */
+const kitFonts = (kit) => {
+  const variable = /^var\((--[\w-]+)\)/.exec(kit.fonts?.body ?? '')?.[1] ?? null
+  return variable ? [{ variable }] : []
+}
+
+/** Writes <componentsDir>/fallback404.css from .fallback404/brand-kit.json; returns the file's repo-relative path. */
+export async function writeSharedCss(root) {
+  const kit = await readJsonIfExists(workspacePath(root, 'brand-kit.json'))
+  if (!kit?.roles) throw new CliError('no_kit', 'Run coverage.mjs run (or identity.mjs --write) first: .fallback404/brand-kit.json is missing.')
+  const project = await loadProject(root, [])
+  const cssFile = `${project.componentsDir}/fallback404.css`
+  await writeTextInside(root, cssFile, renderFallbackCss(kit.roles, kit.darkMode, kitFonts(kit)))
+  return cssFile
+}
+
 export async function main({ flags }) {
   const root = resolve(stringFlag(flags, 'root', '.'))
+  if (flags.css) return { ok: true, wrote: [await writeSharedCss(root)] }
   const identity = await collectIdentity(root)
   const out = resolve(root, stringFlag(flags, 'out', workspacePath(root, 'identity.json')))
   await writeJsonInside(root, out, identity)
-  return {
+  const result = {
     ok: true,
     out: relative(root, out),
     logos: identity.logos.length,
@@ -293,6 +313,13 @@ export async function main({ flags }) {
     darkMode: identity.darkMode.strategy,
     warnings: identity.warnings,
   }
+  if (flags.write) {
+    const { roles, adjusted } = pickRoles(identity)
+    const kitFile = workspacePath(root, 'brand-kit.json')
+    await writeJsonInside(root, kitFile, renderBrandKit(identity, roles))
+    Object.assign(result, { wrote: [relative(root, kitFile)], adjusted })
+  }
+  return result
 }
 
 if (isMain(import.meta.url)) process.exitCode = await runCli(main, process.argv.slice(2))

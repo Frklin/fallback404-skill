@@ -1,0 +1,9 @@
+frontend-design skill
+Copyright Anthropic, PBC.
+
+Licensed under the Apache License, Version 2.0 (see LICENSE.txt in this folder).
+
+frontend-design.md is an unmodified copy of skills/frontend-design/SKILL.md from the "frontend-design" plugin of the
+claude-plugins-official marketplace (plugin cache id f713a7c59b72, copied on 2026-10-14). It is renamed so that skill
+installers do not register it as a skill of its own; its content is unchanged. The rest of Fallback404 is under its own
+MIT license.

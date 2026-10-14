@@ -2,7 +2,8 @@
 // Fallback404 writer: the deterministic files (thin route wrappers for the picked flows, the root not-found router,
 // the static 404 route the proxy checks rewrite to, the dev-only preview page), written only for flows with a final
 // component and never over files it does not own. Every command holds .fallback404/write.lock, so parallel designer
-// agents never interleave. Usage: node write.mjs wrappers [--dry-run] | preview | clean --variants | clean --drafts [--root <dir>]
+// agents never interleave. `apply` is phase 5 in one command: clean --variants, wrappers, preview, manifest.
+// Usage: node write.mjs wrappers [--dry-run] | preview | apply | clean --variants | clean --drafts [--root <dir>]
 import { lstat, readdir, rm, writeFile } from 'node:fs/promises'
 import { join, posix, resolve } from 'node:path'
 import { CliError, isMain, runCli, stringFlag } from './lib/cli.mjs'
@@ -13,8 +14,10 @@ import { withLock } from './lib/lock.mjs'
 import { readOwned } from './lib/owned.mjs'
 import { atLeast } from './lib/project.mjs'
 import { renderGate, renderRouter } from './lib/router.mjs'
+import { writeManifest } from './manifest.mjs'
+import { setPhase } from './state.mjs'
 
-const USAGE = 'Usage: node write.mjs wrappers [--dry-run] | preview | clean --variants | clean --drafts [--root <dir>]'
+const USAGE = 'Usage: node write.mjs wrappers [--dry-run] | preview | apply | clean --variants | clean --drafts [--root <dir>]'
 
 /** Import specifier for a file in the components folder, seen from `fromFile`: the alias when there is one, else relative. */
 export function importSpecifier(scan, fromFile, rel) {
@@ -370,7 +373,7 @@ const literalBasePath = (scan) => (typeof scan.config?.basePath === 'string' && 
  * The app's basePath: config.basePath when the scan could read it, else the one coverage.mjs was given (--base-path,
  * when next.config computes it), which coverage/rows.json keeps.
  */
-async function appBasePath(root, scan) {
+export async function appBasePath(root, scan) {
   const literal = literalBasePath(scan)
   if (literal !== '') return literal
   const rows = await readJsonIfExists(workspacePath(root, 'coverage/rows.json'))
@@ -407,6 +410,7 @@ async function wrappersCommand(root, scan, flags) {
       listed.push({ file: write.file, kind: write.kind, replace, blocked: !replace && !owned.has(write.file) && (await existsAny(join(root, write.file))) })
     }
     for (const { file } of generated) listed.push({ file, kind: 'generated', replace: false, blocked: false })
+    await setPhase(root, 'review')
     return { planned: listed, warnings }
   }
   const writes = planned.map((write) => ({ ...write, content: renderWrapper(write.kind, write.file, scan, { slug: write.slug, identity }) }))
@@ -455,13 +459,24 @@ async function cleanCommand(root, scan, flags) {
   throw new CliError('bad_args', USAGE)
 }
 
+/** Phase 5: the picked flows become route files, the gallery is rebuilt, the manifest records what this run owns. */
+async function applyCommand(root, scan) {
+  const { removed } = await cleanCommand(root, scan, { variants: true })
+  const wrappers = await wrappersCommand(root, scan, {})
+  const preview = await previewCommand(root, scan)
+  const manifest = await writeManifest(root)
+  await setPhase(root, 'write')
+  return { removed, written: [...wrappers.written, ...preview.written], skipped: [...wrappers.skipped, ...preview.skipped], warnings: wrappers.warnings, entries: preview.entries, manifest: manifest.written }
+}
+
 export async function main({ command, flags }) {
   const root = resolve(stringFlag(flags, 'root', '.'))
   const scan = await readJsonIfExists(workspacePath(root, 'scan.json'))
   if (!scan) throw new CliError('no_scan', 'Run scan.mjs first: .fallback404/scan.json is missing.')
-  if (!['wrappers', 'preview', 'clean'].includes(command)) throw new CliError('bad_args', USAGE)
+  if (!['wrappers', 'preview', 'apply', 'clean'].includes(command)) throw new CliError('bad_args', USAGE)
   return withLock(root, 'write', async () => {
     if (command === 'wrappers') return wrappersCommand(root, scan, flags)
+    if (command === 'apply') return applyCommand(root, scan)
     if (command === 'clean') return cleanCommand(root, scan, flags)
     return previewCommand(root, scan)
   })

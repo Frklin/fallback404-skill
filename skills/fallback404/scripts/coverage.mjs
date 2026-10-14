@@ -1,15 +1,24 @@
 #!/usr/bin/env node
 // Fallback404 coverage: turns the scan into the rows of the picker's coverage step (every 404, loading and error flow,
 // with a choice per row), measures what visitors see today at made-up URLs, and turns the choices into plan.json flows:
-// one design step per made row.
-// Usage: node coverage.mjs rows [--drop F3,F7] [--base-url <url>] [--base-path <path>] | manifest | apply <decision.json> [--root <dir>]
+// one design step per made row. `run` does the whole coverage phase in one command: browser probe, identity (brand kit
+// and shared CSS), dev server, rows, screenshots, manifest, site pack, then the picker session and the coverage step.
+// Usage: node coverage.mjs run [--drop F3,F7] [--base-path <path>] [--no-browser] [--no-picker]
+//      | rows [--drop F3,F7] [--base-url <url>] [--base-path <path>] | manifest | apply <decision.json> [--root <dir>]
 import { randomBytes } from 'node:crypto'
-import { posix, resolve } from 'node:path'
+import { join, posix, resolve } from 'node:path'
+import { start as startDev, stop as stopDev } from './devserver.mjs'
+import { main as identityMain } from './identity.mjs'
+import { probeBrowser, runShoot } from './lib/browser.mjs'
 import { CliError, isMain, runCli, stringFlag } from './lib/cli.mjs'
 import { flowKind, stepTitle, uniqueSlugs } from './lib/flows.mjs'
-import { readJson, readJsonIfExists, workspacePath, writeJsonInside } from './lib/fs.mjs'
+import { exists, prepareWrite, readJson, readJsonIfExists, workspacePath, writeJsonInside, writeTextInside } from './lib/fs.mjs'
+import { create as pickerCreate, defaultContext as pickerContext, plan as pickerPlan, propose as pickerPropose } from './picker.mjs'
+import { buildSitePack } from './sitepack.mjs'
+import { setPhase, update as updateState } from './state.mjs'
 
-const USAGE = 'Usage: node coverage.mjs rows [--drop F3,F7] [--base-url <url>] [--base-path <path>] | manifest | apply <decision.json> [--root <dir>]'
+const USAGE =
+  'Usage: node coverage.mjs run [--drop F3,F7] [--base-path <path>] [--no-browser] [--no-picker] | rows [--drop F3,F7] [--base-url <url>] [--base-path <path>] | manifest | apply <decision.json> [--root <dir>]'
 export const MAX_ROWS = 40
 export const STEP_DIR = '.fallback404/steps/coverage-r1'
 const ROWS_FILE = 'coverage/rows.json'
@@ -195,9 +204,10 @@ async function readRows(root) {
   return data
 }
 
-async function manifestCommand(root) {
+/** Writes the coverage manifest from rows.json and the shoot report (given, or read from the step folder). */
+async function manifestCommand(root, given) {
   const data = await readRows(root)
-  const report = await readJsonIfExists(resolve(root, STEP_DIR, 'report.json'))
+  const report = given === undefined ? await readJsonIfExists(resolve(root, STEP_DIR, 'report.json')) : given
   const manifest = buildManifest(data, report?.skipped === false ? report : null)
   await writeJsonInside(root, resolve(root, STEP_DIR, 'manifest.json'), manifest)
   return {
@@ -208,22 +218,108 @@ async function manifestCommand(root) {
   }
 }
 
-async function applyCommand(root, positionals) {
-  if (!positionals[0]) throw new CliError('bad_args', USAGE)
+const pickerCtx = (root) => ({ ...pickerContext(), sessionFile: workspacePath(root, 'session.json') })
+
+/** plan.json from the coverage decision, then the picker's progress chips (one per flow) when a session is open. */
+export async function applyCoverage(root, decisionFile, { setPlan = (kinds) => pickerPlan(pickerCtx(root), { kinds }) } = {}) {
   const { rows } = await readRows(root)
-  const { plan, rootAdded } = applySelection(rows, await readJson(resolve(positionals[0])))
+  const { plan, rootAdded } = applySelection(rows, await readJson(decisionFile))
   const existing = await readJsonIfExists(workspacePath(root, 'plan.json'))
   if (Array.isArray(existing?.userFiles)) plan.userFiles = existing.userFiles
   await writeJsonInside(root, workspacePath(root, 'plan.json'), plan)
+  const warnings = []
+  let pickerPlanSet = false
+  if (plan.flows.length > 0 && (await exists(root, '.fallback404/session.json'))) {
+    // The chips are a courtesy: plan.json is written, so a picker blip must not hide the flows from the model.
+    try {
+      await setPlan(plan.flows.map((flow) => flow.kind).join(','))
+      pickerPlanSet = true
+    } catch (error) {
+      warnings.push(`The picker's progress chips were not set (${error.message}); the steps still work.`)
+    }
+  }
   return {
     flows: plan.flows.map(({ kind, slug, route, state, status }) => ({ kind, slug, title: stepTitle(route, state), route, state, status })),
     approved: plan.approved,
     rootAdded,
+    pickerPlan: pickerPlanSet,
+    warnings,
   }
+}
+
+async function applyCommand(root, positionals) {
+  if (!positionals[0]) throw new CliError('bad_args', USAGE)
+  return applyCoverage(root, resolve(positionals[0]))
+}
+
+/**
+ * The coverage phase in one command. `deps` lets tests run it without a browser, a dev server or the network:
+ * probe(root), shoot(root, planFile), startDev(root), stopDev(root), identity(args), picker.create / picker.propose.
+ */
+export async function runCoverage(root, flags, deps = {}) {
+  const { probe = probeBrowser, shoot = runShoot, startDev: devStart = startDev, stopDev: devStop = stopDev, identity = identityMain } = deps
+  const picker = deps.picker ?? { create: pickerCreate, propose: pickerPropose }
+  const warnings = []
+  const noBrowser = flags['no-browser'] === true
+  if (!noBrowser) {
+    const found = await probe(root)
+    if (!found.browser) return { needsBrowser: true, reason: found.reason, install: found.install ?? null, hint: found.hint ?? null }
+  }
+  const kit = await identity({ command: undefined, positionals: [], flags: { root, write: true } })
+  let devServer = null
+  if (!noBrowser) {
+    try {
+      const started = await devStart(root)
+      devServer = { url: started.url, reused: started.reused === true }
+    } catch (error) {
+      if (!(error instanceof CliError) || !['dev_failed', 'dev_timeout'].includes(error.code)) throw error
+      warnings.push(`${error.message} The coverage page opens without screenshots.`)
+    }
+  }
+  const rows = await rowsCommand(root, { ...flags, ...(devServer ? { 'base-url': devServer.url } : {}) })
+  warnings.push(...rows.warnings)
+  let report = null
+  if (rows.shootPlan && rows.shootable > 0) {
+    await prepareWrite(root, workspacePath(root, 'steps/coverage-r1/manifest.json'))
+    try {
+      report = await shoot(root, join(root, rows.shootPlan))
+      if (report.skipped) warnings.push(`Screenshots skipped (${report.reason}).${report.install ? ` Install: ${report.install}` : ''}`)
+    } catch (error) {
+      warnings.push(`Screenshots failed: ${error.message}`)
+    }
+  }
+  const manifest = await manifestCommand(root, report)
+  const pack = await buildSitePack(root)
+  await writeTextInside(root, workspacePath(root, 'sitepack.md'), pack.text)
+  await setPhase(root, 'coverage')
+  const result = {
+    rows: rows.rows,
+    shootable: rows.shootable,
+    screenshots: manifest.screenshots,
+    overflow: rows.overflow,
+    warnings,
+    devServer,
+    sitepack: { bytes: pack.bytes, cut: pack.sections.filter((section) => section.cut).map((section) => section.name) },
+    brandKit: { adjusted: kit.adjusted ?? [] },
+    manifest: manifest.manifest,
+  }
+  if (rows.rows === 0) {
+    if (devServer && !devServer.reused) await devStop(root)
+    return result
+  }
+  if (flags['no-picker'] === true) return result
+  const identityData = await readJsonIfExists(workspacePath(root, 'identity.json'))
+  const created = await picker.create(pickerCtx(root), { project: identityData?.name ?? 'Your site', plan: 'coverage', open: true })
+  const proposed = await picker.propose(pickerCtx(root), [join(root, manifest.manifest)])
+  await updateState(root, (state) => {
+    state.steps = [...state.steps.filter((step) => step.id !== proposed.stepId), { kind: 'coverage', id: proposed.stepId, round: proposed.round ?? 1, dir: STEP_DIR }]
+  })
+  return { ...result, pickerUrl: created.pickerUrl, opened: created.opened === true, stepId: proposed.stepId }
 }
 
 export async function main({ command, positionals, flags }) {
   const root = resolve(stringFlag(flags, 'root', '.'))
+  if (command === 'run') return runCoverage(root, flags)
   if (command === 'rows') return rowsCommand(root, flags)
   if (command === 'manifest') return manifestCommand(root)
   if (command === 'apply') return applyCommand(root, positionals)

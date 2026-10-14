@@ -20,39 +20,30 @@
 
 `write.mjs wrappers` writes route files that import exactly these names: `app/not-found` imports the router; `loading`, `error` and `global-error` files import their flow's component. A flow that kept the site's current page has no folder, and its file stays the site's.
 
-## brand-kit.json
+## brand-kit.json and fallback404.css
+
+Both are generated and never edited by hand: the kit by `coverage.mjs run` (through `identity.mjs --write`), the stylesheet by `branch.mjs create` (through `identity.mjs --css`) once the branch exists, so nothing lands in the repo before it. `brand-kit.json` (schema 2) holds the site's name, purpose, language, logo file, fonts, radius, `darkMode` (`media`; `class` with `value`; `attribute` with `attribute` and `value`; or `none`) and the eight roles `bg`, `surface`, `ink`, `muted`, `line`, `accent`, `accent-2`, `on-accent`, each with the site token it maps to (or null) and its light and dark values, checked for contrast. `fallback404.css` maps `--f404-<role>` to those tokens on `:root` (literal values in the site's dark-mode block where it has no token), carries the shared classes `.f404-screen`, `.f404-title`, `.f404-body`, `.f404-action`, `.f404-art`, `.f404-loader`, `.f404-loader-inline`, `.f404-visually-hidden`, and the motion presets `.f404-anim-pulse` and `.f404-anim-bounce` with their reduced-motion rule. Every selector in it starts with `.f404-`; the flow's own classes go in its `flow.css`.
+
+## plan.json
+
+`coverage.mjs apply` writes it from the user's choices on the coverage page; keep `userFiles` current.
 
 ```json
 {
   "schema": 2,
-  "name": "Acme",
-  "purpose": "Hand-made kettles, sold online.",
-  "audience": "Tea lovers",
-  "tone": "warm",
-  "lang": "en",
-  "logo": { "file": "public/logo.svg" },
-  "fonts": { "heading": "var(--font-geist-sans)", "body": "var(--font-geist-sans)" },
-  "radius": "var(--radius)",
-  "darkMode": { "strategy": "class", "value": "dark" },
-  "roles": {
-    "bg": { "token": "var(--background)", "light": "#ffffff", "dark": "#0a0a0a" },
-    "surface": { "token": null, "light": "#f4f4f5", "dark": "#18181b" }
-  }
+  "approved": ["F2", "F6"],
+  "flows": [{ "kind": "flow-f6", "rowId": "F6", "slug": "root-not-found", "route": "/", "state": "not-found", "status": "exists", "file": "app/not-found.tsx" }],
+  "userFiles": []
 }
 ```
 
-- All eight roles are required: `bg`, `surface`, `ink`, `muted`, `line`, `accent`, `accent-2`, `on-accent`.
-- `token` is the site's variable for that role (from `identity.json` and the UI brief), or null. `light` and `dark` are the values it resolves to.
-- `darkMode` comes from `identity.json`: `media`; `class` with `value`; `attribute` with `attribute` and `value`; or `none`.
-- Check contrast: `ink` on `bg` and `on-accent` on `accent` reach 4.5:1.
+- `approved`: finding ids the user chose to make (a fixed section brings a missing root 404 along).
+- `flows`: one design step each, in order; `slug` names its folder in `<componentsDir>/flows/`.
+- `userFiles`: user files you changed after the user's yes in the review. `check.mjs` flags any other change.
 
-## fallback404.css
+## A kept root page
 
-- Map roles to tokens on `:root`, e.g. `--f404-ink: var(--foreground);`. A role with `token: null` gets its light value on `:root` and its dark value in the site's dark-mode block: `@media (prefers-color-scheme: dark) { :root { … } }` for `media`, `.dark { … }` for `class`, `[data-theme="dark"] { … }` for `attribute`.
-- Every selector starts with `.f404-`; never style elements globally, since the stylesheet stays loaded across navigations.
-- Shared classes: `.f404-screen`, `.f404-title`, `.f404-body`, `.f404-action`, `.f404-art`, `.f404-loader`, `.f404-loader-inline`, `.f404-visually-hidden`. Prefer the site's own classes and components inside them.
-- Copy the motion presets loaders may use from `house-style/motion/<id>.css`, reduced-motion rule included.
-- Fonts: the brand kit's font variables with a fallback, e.g. `font-family: var(--font-geist-sans), system-ui, sans-serif`.
+When the user kept the root 404 (the current pick, or Keep on the coverage page) while section flows have designs, propose in `changes.md` to move the site's root not-found content into `flows/root-not-found/NotFound.tsx` (`reference/review.md`); without it, sections show the site's root page. The moved file keeps the page unchanged (its imports fixed for the new folder, its default export also exported as `NotFound`) and starts with the line `// Fallback404: the site's own page, moved here unchanged from <path>.`, so `check.mjs` leaves it as the user's code. Write it in phase 5 before `write.mjs apply`, which then writes the router and replaces `app/not-found` with its wrapper. The current page of a `soft` flow is ported the same way after the pick (`port: true`): what the page renders for a missing record goes into `NotFound.tsx` and `copy.ts`, using the same components, so the look stays and the status becomes a real 404.
 
 ## Components
 
@@ -67,4 +58,4 @@ What happened, what to do, one action, in the site's language (`lang`) and tone,
 
 ## After writing
 
-`write.mjs wrappers`, `write.mjs preview`, then phase 8. To remove Fallback404: delete `<componentsDir>`, the route files listed in `manifest.json`, `app/fallback404-missing/`, `app/fallback404-preview/`, and your block in the proxy.
+`write.mjs apply`, then phase 6. To remove Fallback404: delete `<componentsDir>`, the route files listed in `manifest.json`, `app/fallback404-missing/`, `app/fallback404-preview/`, and your block in the proxy.

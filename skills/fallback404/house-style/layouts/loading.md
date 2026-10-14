@@ -1,6 +1,7 @@
-# Layout: loading
+# loading: constraints
 
-- Full-page loader (`<Loader />`): a fixed box (`.f404-loader`, `min-block-size: 50vh` or the size of the content it stands in for).
-- Inline loader (`<Loader inline />`, for Suspense fallbacks): `.f404-loader-inline`, a smaller fixed box (`min-block-size: 6rem`).
-- What moves: a skeleton that mirrors the route's layout with the site's surfaces and radius, the site's own spinner or progress component, or the site's logo with a motion preset.
-- `role="status"` on the box and visually hidden text from the flow's `copy.ts`. No text that changes, no progress numbers.
+- `Loader({ inline })`: the root has the `f404-loader` class, plus `f404-loader-inline` when `inline`; the box keeps a fixed size.
+- `role="status"` on the box with visually hidden text from `copy.ts`. No changing text, no progress numbers.
+- What moves: the site's own spinner or skeleton, a skeleton of the route in the site's surfaces and radius, or the logo
+  with a motion preset. Stops under `prefers-reduced-motion`.
+- Within the 15 KB gzipped budget with what it imports.

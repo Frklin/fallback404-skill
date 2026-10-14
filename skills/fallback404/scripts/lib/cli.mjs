@@ -2,7 +2,7 @@
 import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
-export const SKILL_VERSION = '0.2.0'
+export const SKILL_VERSION = '0.3.0'
 
 export class CliError extends Error {
   constructor(code, message) {
@@ -60,8 +60,9 @@ export async function runCli(handler, argv, io = defaultIo()) {
     if (result !== undefined) io.stdout(typeof result === 'string' ? result : JSON.stringify(result))
     return 0
   } catch (error) {
+    // picker.mjs carries its own error class with the same shape: any error with a string code keeps it.
     const payload =
-      error instanceof CliError ? { code: error.code, message: error.message } : { code: 'internal', message: String(error?.message ?? error) }
+      typeof error?.code === 'string' && error.code !== '' ? { code: error.code, message: error.message } : { code: 'internal', message: String(error?.message ?? error) }
     io.stderr(JSON.stringify({ error: payload }))
     return 1
   }

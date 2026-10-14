@@ -1,5 +1,6 @@
-# Layout: error
+# error: constraints
 
-- Same column as not-found.
-- Order: an optional scene, `<h1>` with the message, one sentence, a primary button that calls `retry()`, and a secondary link home.
-- Client Component (`'use client'`). Never show the error message itself to visitors; `error.digest` may go in a data attribute for support.
+- `'use client'`; exports `ErrorState({ error, retry })`.
+- One `<h1>`, one sentence, a button that calls `retry()`, an optional link home.
+- Never shows `error.message` to visitors; `error.digest` may go in a data attribute.
+- Any scene is decorative and at most about 240px tall; works from 320px wide.

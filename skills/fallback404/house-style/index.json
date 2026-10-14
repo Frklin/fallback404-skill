@@ -1,5 +1,7 @@
 {
-  "schema": 2,
+  "schema": 3,
+  "guide": "vendor/frontend-design/frontend-design.md",
+  "overlay": "STYLE.md",
   "motion": [
     { "id": "draw-on", "file": "motion/draw-on.css", "label": "Draw-on (SVG strokes only)" },
     { "id": "bounce", "file": "motion/bounce.css", "label": "Bounce" },

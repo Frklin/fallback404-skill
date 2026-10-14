@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 // Fallback404 check: enforces the output rules on the generated files (accessibility, tokens, motion, 404 patterns,
 // write scope) and prints { ok, violations, warnings }. Claude fixes every violation and runs it again.
-// Usage: node check.mjs [--root <dir>]
-import { posix, resolve } from 'node:path'
+// --full adds the type check, the dev server, the status checks and one screenshot per flow in .fallback404/check/;
+// --prod builds the app, starts it on a free port and runs the same checks there.
+// Usage: node check.mjs [--full] [--prod] [--root <dir>]
+import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { createRequire } from 'node:module'
+import { join, posix, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
+import { madeUpPath } from './coverage.mjs'
+import { freePort, start as startDev, stop as stopDev } from './devserver.mjs'
+import { runShoot } from './lib/browser.mjs'
 import {
   defaultExportNode,
   exportBindings,
@@ -23,9 +31,12 @@ import {
 import { CliError, isMain, runCli, stringFlag } from './lib/cli.mjs'
 import { ROOT_NOT_FOUND, componentFile, isSectionFix } from './lib/flows.mjs'
 import { parseCss, walkCss } from './lib/css.mjs'
-import { readJsonIfExists, readText, walk, workspacePath } from './lib/fs.mjs'
-import { changedPaths, git, isGitRepo } from './lib/git.mjs'
+import { readJsonIfExists, readText, walk, workspacePath, writeJsonInside } from './lib/fs.mjs'
+import { changedPaths, isGitRepo } from './lib/git.mjs'
 import { atLeast } from './lib/project.mjs'
+import { toolchainWrote } from './lib/toolchain.mjs'
+import { setPhase } from './state.mjs'
+import { appBasePath, presentFlows } from './write.mjs'
 
 /** First line of the site's own root not-found page, moved unchanged into flows/root-not-found/ so the router can show it. */
 export const MOVED_MARKER = "// Fallback404: the site's own page, moved here unchanged from "
@@ -269,37 +280,6 @@ async function checkUnroutedTarget(root, scan, add) {
   }
 }
 
-// Next.js 16.3+ `next dev` upserts these managed blocks into AGENTS.md (or a CLAUDE.md alone) unless next.config sets agentRules: false.
-const NEXT_AGENT_BLOCKS = [
-  ['<!-- BEGIN:nextjs-agent-rules -->', '<!-- END:nextjs-agent-rules -->'],
-  ['<!-- BEGIN:nextjs-agent-feedback -->', '<!-- END:nextjs-agent-feedback -->'],
-  ['<!-- NEXT-AGENTS-MD-START -->', '<!-- NEXT-AGENTS-MD-END -->'],
-]
-
-function withoutNextBlocks(text) {
-  let rest = text
-  for (const [start, end] of NEXT_AGENT_BLOCKS) {
-    for (let from = rest.indexOf(start); from !== -1; from = rest.indexOf(start)) {
-      const to = rest.indexOf(end, from)
-      if (to === -1) break
-      rest = rest.slice(0, from) + rest.slice(to + end.length)
-    }
-  }
-  return rest.replace(/\s+/g, ' ').trim()
-}
-
-/** True for files the app's own tools rewrite while the skill runs them: next dev and next build, and tsc. */
-async function toolchainWrote(root, path) {
-  if (path === 'next-env.d.ts' || path.endsWith('.tsbuildinfo')) return true
-  if (path !== 'AGENTS.md' && path !== 'CLAUDE.md') return false
-  const now = await readText(root, path)
-  if (now === null) return false
-  const before = await git(root, ['show', `HEAD:./${path}`]).catch(() => '')
-  // Next.js 16.3's next dev scaffolds CLAUDE.md as a pointer to AGENTS.md when neither file exists.
-  if (path === 'CLAUDE.md' && before === '' && now === '@AGENTS.md\n') return true
-  return withoutNextBlocks(now) === withoutNextBlocks(before)
-}
-
 async function checkScope(root, scan, plan, owned, add, warnings) {
   if (!(await isGitRepo(root))) {
     warnings.push('Not a git repository, so the write-scope rule was skipped.')
@@ -412,8 +392,171 @@ export async function runChecks(root) {
   return { ok: violations.length === 0, violations, warnings }
 }
 
+/** The title in a flow's copy file, or null. */
+export async function copyTitle(root, scan, slug) {
+  const file = `${scan.componentsDir}/flows/${slug}/copy.${scan.typescript ? 'ts' : 'js'}`
+  const source = await readText(root, file)
+  if (source === null) return null
+  try {
+    const value = literalValue(topLevelBindings(parseSource(source, file)).get('copy'))
+    return value && typeof value === 'object' && typeof value.title === 'string' ? value.title : null
+  } catch {
+    return null
+  }
+}
+
+/** The phase-6 shoot plan: a status check per real-404 route, the preview, and one shot per flow (dev only). */
+export function buildCheckPlan(scan, plan, present, { baseUrl, basePath, token, darkMode, prod, rootLoading, titles }) {
+  const withTitle = (slug, check) => (titles[slug] ? { ...check, expectText: titles[slug] } : check)
+  const checks = [withTitle(ROOT_NOT_FOUND, { path: madeUpPath('/', token), expectStatus: 404 })]
+  const findings = new Map((scan.findings ?? []).map((finding) => [finding.id, finding]))
+  const approved = new Set(plan.approved ?? [])
+  for (const flow of plan.flows ?? []) {
+    const finding = findings.get(flow.rowId)
+    if (finding?.proposal?.type !== 'proxy' || !approved.has(flow.rowId) || !present.has(flow.slug)) continue
+    const check = withTitle(flow.slug, { path: madeUpPath(flow.route, token), expectStatus: 404 })
+    // With no /fallback404-missing route (a root loading file), the first paint must already show the section's design.
+    const unrouted = !finding.proposal.files?.some((file) => file.includes('/fallback404-missing/'))
+    checks.push(unrouted ? { ...check, hydrate: false } : check)
+  }
+  if (!prod) checks.push({ path: '/fallback404-preview', expectStatus: 200 })
+  else if (rootLoading) checks.push(withTitle(ROOT_NOT_FOUND, { path: '/fallback404-preview', expectStatus: 200 }))
+  else checks.push({ path: '/fallback404-preview', expectStatus: 404 })
+  const shots = prod
+    ? []
+    : (plan.flows ?? [])
+        .filter((flow) => present.has(flow.slug))
+        .flatMap((flow) => [
+          { path: `/fallback404-preview?flow=${flow.slug}&solo=1`, name: flow.slug },
+          ...(flow.state === 'loading' ? [{ path: `/fallback404-preview?flow=${flow.slug}&inline=1&solo=1`, name: `${flow.slug}-inline` }] : []),
+        ])
+  return { baseUrl, basePath, out: '.fallback404/check', darkMode, checks, shots }
+}
+
+const tail = (text, lines = 30) => text.trim().split('\n').slice(-lines).join('\n')
+
+function runChild(cmd, args, options) {
+  return new Promise((done) => {
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options })
+    let output = ''
+    child.stdout.on('data', (chunk) => (output += chunk))
+    child.stderr.on('data', (chunk) => (output += chunk))
+    child.on('error', (error) => done({ code: 1, output: error.message }))
+    child.on('close', (code) => done({ code, output }))
+  })
+}
+
+/** tsc --noEmit with the project's own TypeScript; skipped when it is not installed. */
+export async function runTsc(root) {
+  let bin
+  try {
+    bin = createRequire(join(root, 'package.json')).resolve('typescript/bin/tsc')
+  } catch {
+    return { skipped: 'typescript is not installed here, so the type check was skipped.' }
+  }
+  const { code, output } = await runChild(process.execPath, [bin, '--noEmit', '-p', '.'], { cwd: root })
+  return { ok: code === 0, output: code === 0 ? '' : tail(output) }
+}
+
+async function waitFor(url, timeoutMs = 90000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(5000) })
+      return true
+    } catch {
+      await new Promise((done) => setTimeout(done, 500))
+    }
+  }
+  return false
+}
+
+/** next build, then next start on a free port for `task(url)`; the server is stopped afterwards. */
+async function withProductionServer(root, task) {
+  const next = createRequire(join(root, 'package.json')).resolve('next/dist/bin/next')
+  const build = await runChild(process.execPath, [next, 'build'], { cwd: root })
+  if (build.code !== 0) throw new CliError('build_failed', `next build failed:\n${tail(build.output, 40)}`)
+  const port = await freePort()
+  const server = spawn(process.execPath, [next, 'start', '-p', String(port)], { cwd: root, stdio: 'ignore' })
+  try {
+    const url = `http://localhost:${port}`
+    if (!(await waitFor(url))) throw new CliError('start_failed', 'next start did not answer within 90 s.')
+    return await task(url)
+  } finally {
+    server.kill('SIGTERM')
+  }
+}
+
+/**
+ * The output rules, the type check, the server (dev, or the production build with `prod`), the status checks and the
+ * screenshots, in one report. The dev server stays up for the fixes that follow; `finish` stops it.
+ */
+export async function fullCheck(root, { prod = false, runTsc: tsc = runTsc, startDev: devStart = startDev, stopDev: devStop = stopDev, runProd = withProductionServer, runShootImpl = runShoot } = {}) {
+  const scan = await readJsonIfExists(workspacePath(root, 'scan.json'))
+  if (!scan) throw new CliError('no_scan', 'Run scan.mjs first: .fallback404/scan.json is missing.')
+  const plan = (await readJsonIfExists(workspacePath(root, 'plan.json'))) ?? {}
+  const result = { ...(await runChecks(root)), tsc: null, server: null, checks: [], shots: [], skipped: [] }
+  result.tsc = scan.typescript ? await tsc(root) : { skipped: 'no TypeScript in this project' }
+  const present = await presentFlows(root, scan)
+  const titles = {}
+  for (const flow of plan.flows ?? []) if (present.has(flow.slug)) titles[flow.slug] = await copyTitle(root, scan, flow.slug)
+  const kit = await readJsonIfExists(workspacePath(root, 'brand-kit.json'))
+  const identity = await readJsonIfExists(workspacePath(root, 'identity.json'))
+  const rootLoadingFile = new RegExp(`^${scan.appDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/loading\\.[jt]sx?$`)
+  const rootLoading = (scan.routes ?? []).some((route) => typeof route.loadingFile === 'string' && rootLoadingFile.test(route.loadingFile))
+  const options = {
+    basePath: await appBasePath(root, scan),
+    token: randomBytes(4).toString('hex'),
+    darkMode: kit?.darkMode ?? identity?.darkMode ?? { strategy: 'media' },
+    prod,
+    rootLoading,
+    titles,
+  }
+  const shootAt = async (baseUrl) => {
+    const planFile = workspacePath(root, 'check/shoot-plan.json')
+    await writeJsonInside(root, planFile, buildCheckPlan(scan, plan, present, { ...options, baseUrl }))
+    const report = await runShootImpl(root, planFile)
+    if (report.skipped) {
+      result.skipped.push(`Browser checks skipped (${report.reason}).${report.install ? ` Install: ${report.install}` : ''}`)
+      return
+    }
+    result.checks = report.checks
+    result.shots = report.shots
+  }
+  try {
+    if (prod) {
+      // Before Next 16, next dev and next build share .next/: a dev server Fallback404 started must stop first.
+      const dev = await readJsonIfExists(workspacePath(root, 'dev.json'))
+      if (dev && dev.reused !== true && !atLeast(scan.next, 16)) {
+        await devStop(root)
+        result.stoppedDev = true
+      }
+      await runProd(root, async (url) => {
+        result.server = { url, mode: 'production' }
+        await shootAt(url)
+      })
+    } else {
+      try {
+        const started = await devStart(root)
+        result.server = { url: started.url, mode: 'dev' }
+        await shootAt(started.url)
+      } catch (error) {
+        if (!(error instanceof CliError) || !['dev_failed', 'dev_timeout'].includes(error.code)) throw error
+        result.skipped.push(`${error.message} The browser checks were skipped; the production check (--prod) is still worth running.`)
+      }
+    }
+  } finally {
+    await setPhase(root, 'check')
+  }
+  const browserOk = result.checks.every((check) => check.ok) && result.shots.every((shot) => (shot.pageErrors ?? []).length === 0 && shot.overflowX !== true)
+  result.ok = result.violations.length === 0 && result.tsc.ok !== false && browserOk
+  return result
+}
+
 export async function main({ flags }) {
-  return runChecks(resolve(stringFlag(flags, 'root', '.')))
+  const root = resolve(stringFlag(flags, 'root', '.'))
+  if (flags.full || flags.prod) return fullCheck(root, { prod: flags.prod === true })
+  return runChecks(root)
 }
 
 if (isMain(import.meta.url)) process.exitCode = await runCli(main, process.argv.slice(2))

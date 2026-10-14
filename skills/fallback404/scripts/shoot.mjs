@@ -3,6 +3,7 @@
 // never lands in the user's project:
 //   npx --yes --no-update-notifier -p playwright@1.64.0 node shoot.mjs <plan.json> [--status-only] [--root <dir>]
 // Without Playwright or a browser it reports { skipped: true } and exits 0; --status-only needs neither.
+// --probe only checks that Playwright and a Chromium can launch: { skipped: false, browser: true } or the install command.
 // A check may set "hydrate": false (the framework's scripts are blocked) or "javaScript": false, to see the first paint.
 import { readFileSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
@@ -15,7 +16,7 @@ export const PLAYWRIGHT_VERSION = '1.64.0'
 export const SHOOT_COMMAND = `npx --yes --no-update-notifier -p playwright@${PLAYWRIGHT_VERSION} node`
 const NAME = /^[a-z0-9][a-z0-9-]*$/
 const THEMES = ['light', 'dark']
-const USAGE = `Usage: ${SHOOT_COMMAND} shoot.mjs <plan.json> [--status-only] [--root <dir>]`
+const USAGE = `Usage: ${SHOOT_COMMAND} shoot.mjs <plan.json> [--status-only] [--root <dir>] | --probe`
 
 /** The playwright package npx installed: npx puts <install>/node_modules/.bin on PATH, and the package sits next to it. */
 export function findPlaywright(env = process.env) {
@@ -177,6 +178,15 @@ export async function runShots(plan, chromium, root) {
 
 export async function main({ command, positionals, flags }) {
   const root = resolve(stringFlag(flags, 'root', '.'))
+  if (flags.probe) {
+    const dir = findPlaywright()
+    if (!dir) return { skipped: true, reason: 'no-playwright', hint: `Run shoot.mjs through: ${SHOOT_COMMAND} <skill>/scripts/shoot.mjs --probe` }
+    const { chromium } = await import(pathToFileURL(join(dir, 'index.mjs')).href)
+    const browser = await launch(chromium)
+    if (!browser) return { skipped: true, reason: 'no-browser', install: `npx -y playwright@${PLAYWRIGHT_VERSION} install chromium-headless-shell` }
+    await browser.close()
+    return { skipped: false, browser: true }
+  }
   const planFile = command ?? positionals[0]
   if (!planFile) throw new CliError('bad_args', USAGE)
   const plan = normalizePlan(await readJson(resolve(planFile)))

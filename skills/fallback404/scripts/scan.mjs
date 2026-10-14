@@ -13,6 +13,7 @@ import { preflight } from './lib/project.mjs'
 import { readProxy } from './lib/proxy.mjs'
 import { renderReport } from './lib/report.mjs'
 import { buildRoutes, nearest } from './lib/routes.mjs'
+import { setPhase } from './state.mjs'
 
 const USAGE = 'Usage: node scan.mjs [--preflight] [--report] [--out <file>] [--root <dir>]'
 
@@ -105,6 +106,7 @@ export async function main({ command, flags }) {
   const out = resolve(root, stringFlag(flags, 'out', workspacePath(root, 'scan.json')))
   await writeJsonInside(root, out, result)
   await ensureExcluded(root)
+  await setPhase(root, 'scan')
   if (flags.report) return renderReport(result)
   return { ok: true, out: relative(root, out), routes: result.routes.length, findings: result.findings.length, warnings: result.warnings }
 }
